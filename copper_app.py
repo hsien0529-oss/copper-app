@@ -18,38 +18,37 @@ inventory_level = st.sidebar.select_slider("目前庫存水位", options=["低",
 # --- 核心函數：抓取資料 ---
 # --- 核心函數：抓取資料 ---
 # --- 核心函數：抓取資料 ---
+# --- 核心函數：抓取資料 ---
 @st.cache_data(ttl=3600)
 def get_data():
     data = pd.DataFrame()
     try:
-        # 方法 1: 使用 Ticker.history (較穩定)
-        # 用戶抱怨 Render 上抓不到資料，嘗試分開抓取並合併
+        # 方法 1: 使用標準 yf.download (讓 yfinance 自己處理 Session)
+        # 用戶回報自訂 Session 會導致錯誤，因此改回原版寫法
+        # 並加入 curl_cffi 到 requirements.txt 嘗試解決 Render 問題
         
-        # 建立 Session (偽裝瀏覽器)
-        session = requests.Session()
-        session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        })
+        tickers = ["HG=F", "TWD=X"]
+        
+        # 下載數據 (不傳入 session 參數)
+        raw_data = yf.download(tickers, period="3mo", progress=False)
+        
+        # 資料清理
+        if isinstance(raw_data.columns, pd.MultiIndex):
+            try:
+                # 嘗試提取 'Close' 層級
+                data = raw_data['Close']
+            except KeyError:
+                data = raw_data # 保持原狀
+        else:
+            data = raw_data['Close'] if 'Close' in raw_data else raw_data
 
-        # 抓取銅價
-        copper = yf.Ticker("HG=F", session=session)
-        df_copper = copper.history(period="3mo")
-        
-        # 抓取匯率
-        usd = yf.Ticker("TWD=X", session=session)
-        df_usd = usd.history(period="3mo")
-        
-        if not df_copper.empty and not df_usd.empty:
-            # 整理並正規化 Index (去除時區資訊以利合併)
-            df_copper.index = df_copper.index.tz_localize(None)
-            df_usd.index = df_usd.index.tz_localize(None)
-            
-            # 重新命名 Close 欄位
-            df_copper = df_copper[['Close']].rename(columns={'Close': 'HG=F'})
-            df_usd = df_usd[['Close']].rename(columns={'Close': 'TWD=X'})
-            
-            # 合併 (使用 Inner Join 確保兩者都有數據)
-            data = pd.concat([df_copper, df_usd], axis=1).dropna()
+        # 確保只有兩欄並且去除空值
+        if not data.empty:
+            # 確保欄位存在
+            if "HG=F" in data.columns and "TWD=X" in data.columns:
+                data = data[["HG=F", "TWD=X"]].dropna()
+            else:
+                data = pd.DataFrame() # 欄位不足視為失敗
         
     except Exception as e:
         print(f"Error fetching real data: {e}")
