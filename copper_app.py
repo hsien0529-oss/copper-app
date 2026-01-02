@@ -17,29 +17,72 @@ inventory_level = st.sidebar.select_slider("目前庫存水位", options=["低",
 
 # --- 核心函數：抓取資料 ---
 # --- 核心函數：抓取資料 ---
-@st.cache_data(ttl=3600) # 每小時快取一次，避免頻繁請求
+# --- 核心函數：抓取資料 ---
+@st.cache_data(ttl=3600)
 def get_data():
+    data = pd.DataFrame()
     try:
-        # 1. 建立 Session 並設定 User-Agent (解決雲端擋 IP 問題)
+        # 方法 1: 使用 Ticker.history (較穩定)
+        # 用戶抱怨 Render 上抓不到資料，嘗試分開抓取並合併
+        
+        # 建立 Session (偽裝瀏覽器)
         session = requests.Session()
         session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         })
 
-        # 2. 分別抓取數據 (避免一次抓取失敗導致全部失敗)
-        # 增加 'Close' 欄位選取以確保格式統一
-        hg = yf.download("HG=F", period="3mo", progress=False, session=session)['Close']
-        twd = yf.download("TWD=X", period="3mo", progress=False, session=session)['Close']
+        # 抓取銅價
+        copper = yf.Ticker("HG=F", session=session)
+        df_copper = copper.history(period="3mo")
         
-        # 3. 合併數據
-        # 使用 outer join 保留所有日期，然後 fillna
-        data = pd.DataFrame({'HG=F': hg, 'TWD=X': twd}).dropna()
+        # 抓取匯率
+        usd = yf.Ticker("TWD=X", session=session)
+        df_usd = usd.history(period="3mo")
         
-        return data
-
+        if not df_copper.empty and not df_usd.empty:
+            # 整理並正規化 Index (去除時區資訊以利合併)
+            df_copper.index = df_copper.index.tz_localize(None)
+            df_usd.index = df_usd.index.tz_localize(None)
+            
+            # 重新命名 Close 欄位
+            df_copper = df_copper[['Close']].rename(columns={'Close': 'HG=F'})
+            df_usd = df_usd[['Close']].rename(columns={'Close': 'TWD=X'})
+            
+            # 合併 (使用 Inner Join 確保兩者都有數據)
+            data = pd.concat([df_copper, df_usd], axis=1).dropna()
+        
     except Exception as e:
-        print(f"Data Fetch Error: {e}")
-        return pd.DataFrame() # 回傳空 DataFrame 以便後續處理
+        print(f"Error fetching real data: {e}")
+        st.warning(f"無法連線至金融資料庫 ({e})，正在切換至模擬數據模式...")
+
+    # 方法 2: 如果抓不到 (Data Frame 為空)，產生模擬數據 (Fallback)
+    if data.empty:
+        st.metric("系統狀態", "⚠️ 使用離線/模擬數據", "請檢查網路")
+        
+        # 產生過去 90 天的日期
+        dates = pd.date_range(end=datetime.now(), periods=90)
+        
+        # 模擬銅價 (約 4.0 ~ 4.5 USD/lb -> 轉頓約 9000~10000)
+        # 這裡為了展示，先生成 lbs 再轉
+        import numpy as np
+        base_price = 4.2
+        random_walk = np.cumsum(np.random.randn(90) * 0.05)
+        mock_prices = (base_price + random_walk) # USD/lb
+        
+        # 模擬匯率
+        base_fx = 31.5
+        fx_walk = np.cumsum(np.random.randn(90) * 0.02)
+        mock_fx = base_fx + fx_walk
+        
+        data = pd.DataFrame({
+            'HG=F': mock_prices, 
+            'TWD=X': mock_fx
+        }, index=dates)
+        
+        # 模擬標題告知
+        st.info("目前顯示為「模擬數據」，僅供功能測試。無法從雲端抓取即時報價。")
+
+    return data
 
 # --- 核心函數：取得新聞 (模擬) ---
 # --- 核心函數：取得新聞 (Google News RSS) ---
