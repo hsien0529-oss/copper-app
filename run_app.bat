@@ -7,10 +7,9 @@ echo    (Repair Version)
 echo ==========================================
 
 :: 1. Check for Python
-python --version >nul 2>nul
 if %errorlevel% neq 0 (
     echo [ERROR] Python is not installed or not in PATH.
-    echo Please install Python (check "Add Python to PATH" during installation).
+    echo Please install Python - ensure "Add Python to PATH" is checked during installation.
     echo Download: https://www.python.org/downloads/
     pause
     exit /b
