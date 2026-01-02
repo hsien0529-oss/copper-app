@@ -16,23 +16,30 @@ ma_long = st.sidebar.slider("長期均線 (MA)", 20, 60, 20)
 inventory_level = st.sidebar.select_slider("目前庫存水位", options=["低", "中", "高"], value="中")
 
 # --- 核心函數：抓取資料 ---
+# --- 核心函數：抓取資料 ---
 @st.cache_data(ttl=3600) # 每小時快取一次，避免頻繁請求
 def get_data():
-    # HG=F 是 COMEX 銅期貨 (與 LME 高度連動，且資料取得較即時免費)
-    # TWD=X 是 美元兌台幣匯率
-    tickers = ["HG=F", "TWD=X"]
-    data = yf.download(tickers, period="3mo", progress=False)
-    
-    # 資料清理
-    # yfinance 新版下載多個 ticker 時會產生 MultiIndex columns，需處理
-    if isinstance(data.columns, pd.MultiIndex):
-        try:
-            # 嘗試提取 'Close' 層級，如果失敗則保持原狀
-            data = data['Close']
-        except KeyError:
-            pass # 如果沒有 'Close' 層級，就用原始的 MultiIndex 處理 (下面會再檢查)
-            
-    return data
+    try:
+        # 1. 建立 Session 並設定 User-Agent (解決雲端擋 IP 問題)
+        session = requests.Session()
+        session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        })
+
+        # 2. 分別抓取數據 (避免一次抓取失敗導致全部失敗)
+        # 增加 'Close' 欄位選取以確保格式統一
+        hg = yf.download("HG=F", period="3mo", progress=False, session=session)['Close']
+        twd = yf.download("TWD=X", period="3mo", progress=False, session=session)['Close']
+        
+        # 3. 合併數據
+        # 使用 outer join 保留所有日期，然後 fillna
+        data = pd.DataFrame({'HG=F': hg, 'TWD=X': twd}).dropna()
+        
+        return data
+
+    except Exception as e:
+        print(f"Data Fetch Error: {e}")
+        return pd.DataFrame() # 回傳空 DataFrame 以便後續處理
 
 # --- 核心函數：取得新聞 (模擬) ---
 # --- 核心函數：取得新聞 (Google News RSS) ---
